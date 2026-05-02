@@ -9,47 +9,54 @@ const SEAT_ROWS = [
   ['C1', 'C2', 'C3', 'C4'],
 ];
 
+const TOTAL_SEATS = 12;
+
 export default function Home() {
   const [selectedSeat, setSelectedSeat] = useState(null);
-  const [soldSeats, setSoldSeats] = useState([]); // List of IDs ['A1', 'B2']
+  const [soldSeats, setSoldSeats] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // --- NEW STATE ---
-  const [username, setUsername] = useState(""); 
-  const myAttempts = useRef(new Set()); // Tracks seats WE tried to book
+  const userId = useRef("");
+  const myAttempts = useRef(new Set());
 
   const BUY_URL = "/api/buy"; 
   const INVENTORY_URL = "/api/inventory"; 
 
-  // --- POLLING & REFEREE LOGIC ---
+  useEffect(() => {
+    userId.current = "Guest_" + Math.floor(Math.random() * 10000);
+  }, []);
+
+  // --- POLLING & CONFIRMATION LOGIC ---
   useEffect(() => {
     const fetchInventory = async () => {
       try {
         const res = await fetch(INVENTORY_URL);
         if (res.ok) {
-          const data = await res.json(); // Returns: [{id: 'A1', owner: 'Tanisha'}, ...]
-          
-          // 1. Update Visuals (Disable buttons)
-          const soldIds = data.map(item => item.id);
-          setSoldSeats(soldIds);
+          const data = await res.json(); 
+          setSoldSeats(data);
 
-          // 2. THE REFEREE CHECK 🏁
           data.forEach(seat => {
-            // If WE tried to buy this seat...
-            if (myAttempts.current.has(seat.id)) {
-              
-              // ...and it is now SOLD (has an owner)
-              if (seat.owner === username) {
-                // WE WON! 🎉
-                toast.success(`VICTORY! You secured ${seat.id}!`, { duration: 5000, icon: '🏆' });
-                confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
-              } else {
-                // WE LOST! 💀
-                toast.error(`TOO SLOW! ${seat.owner} took ${seat.id}.`, { duration: 5000, icon: '💔' });
-              }
+            const seatId = typeof seat === 'string' ? seat : seat.id;
+            const seatOwner = typeof seat === 'string' ? 'Taken' : seat.owner;
 
-              // Stop checking this seat (remove from attempts)
-              myAttempts.current.delete(seat.id);
+            if (myAttempts.current.has(seatId)) {
+              if (seatOwner === userId.current) {
+                // GREEN for Success
+                toast(`Seat ${seatId} successfully booked!`, { 
+                  duration: 4000, 
+                  icon: null,
+                  style: { background: '#10b981', color: '#fff', fontWeight: 'bold' }
+                });
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+              } else {
+                // RED for Taken/Unavailable
+                toast(`Seat ${seatId} is unavailable.`, { 
+                  duration: 4000, 
+                  icon: null,
+                  style: { background: '#ef4444', color: '#fff', fontWeight: 'bold' }
+                });
+              }
+              myAttempts.current.delete(seatId);
             }
           });
         }
@@ -61,53 +68,67 @@ export default function Home() {
     fetchInventory();
     const interval = setInterval(fetchInventory, 2000);
     return () => clearInterval(interval);
-  }, [username]); // Restart polling if username changes
+  }, []);
 
   const handleSeatClick = (seatId) => {
-    if (soldSeats.includes(seatId)) return;
+    const isSold = soldSeats.some(s => (typeof s === 'string' ? s : s.id) === seatId);
+    if (isSold) return;
     setSelectedSeat(seatId);
   };
 
   const buyTicket = async () => {
-    if (!username) {
-      toast.error("Please enter your name first!");
-      return;
-    }
     if (!selectedSeat) {
-      toast.error("Please select a seat!");
+      // YELLOW for Warnings
+      toast("Please select a seat!", { 
+        icon: null,
+        style: { background: '#f59e0b', color: '#fff', fontWeight: 'bold' }
+      });
       return;
     }
 
     setLoading(true);
-    
-    // Remember that we are trying to buy this seat
     myAttempts.current.add(selectedSeat);
 
     try {
       const res = await fetch(BUY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: username, item_id: selectedSeat }), // Send REAL Name
+        body: JSON.stringify({ user_id: userId.current, item_id: selectedSeat }), 
       });
 
       if (res.ok) {
-        toast.loading(`Fighting for ${selectedSeat}...`, { duration: 2000 });
+        // BLUE for Processing
+        toast(`Processing ${selectedSeat}...`, { 
+          duration: 2000, 
+          icon: null,
+          style: { background: '#3b82f6', color: '#fff', fontWeight: 'bold' }
+        });
         setSelectedSeat(null);
       } else {
-        toast.error("Failed to join queue.");
-        myAttempts.current.delete(selectedSeat); // Don't wait for result
+        toast("Failed to process request.", { 
+          icon: null,
+          style: { background: '#ef4444', color: '#fff', fontWeight: 'bold' }
+        });
+        myAttempts.current.delete(selectedSeat); 
       }
     } catch (err) {
-      toast.error("Network Error.");
+      toast("Network Error.", { 
+        icon: null,
+        style: { background: '#ef4444', color: '#fff', fontWeight: 'bold' }
+      });
       myAttempts.current.delete(selectedSeat);
     } finally {
       setLoading(false);
     }
   };
 
+  const occupiedCount = soldSeats.length;
+  const remainingCount = TOTAL_SEATS - occupiedCount;
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-4 font-sans">
-      <Toaster position="top-center" />
+      {/* Ensure Toaster has no default styling conflicting with our custom styles */}
+      <Toaster position="top-center" toastOptions={{ className: 'custom-toast' }} />
       
       <div className="max-w-2xl w-full bg-zinc-900 p-8 rounded-2xl border border-zinc-800 shadow-2xl text-center">
         
@@ -115,27 +136,28 @@ export default function Home() {
           Flux Cinema
         </h1>
         <p className="text-gray-400 mb-6">
-          <span className="text-green-400">●</span> Live Race Mode
+          <span className="text-green-400">●</span> Live Booking System
         </p>
 
-        {/* --- NAME INPUT --- */}
-        <div className="mb-8 flex justify-center">
-          <input 
-            type="text" 
-            placeholder="Enter Your Name" 
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="bg-zinc-800 border border-zinc-600 text-white text-center text-lg rounded-lg p-3 w-64 focus:outline-none focus:border-purple-500 transition-colors"
-          />
+        <div className="flex justify-between items-center bg-zinc-800/50 p-4 rounded-lg mb-8 border border-zinc-700/50">
+          <div className="text-sm">
+            <span className="text-zinc-400">Occupied: </span>
+            <span className="font-bold text-red-400">{occupiedCount}</span>
+          </div>
+          <div className="text-xs text-zinc-500 uppercase tracking-widest">Screen</div>
+          <div className="text-sm">
+            <span className="text-zinc-400">Remaining: </span>
+            <span className="font-bold text-green-400">{remainingCount}</span>
+          </div>
         </div>
 
-        <div className="text-xs text-zinc-500 mb-6 uppercase tracking-widest">Screen</div>
-
-        <div className="flex flex-col gap-3 items-center mb-10">
+        <div className="flex flex-col gap-4 items-center mb-10">
           {SEAT_ROWS.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-3">
+            <div key={rowIndex} className="flex gap-4">
               {row.map((seat) => {
-                const isSold = soldSeats.includes(seat);
+                const soldObj = soldSeats.find(s => (typeof s === 'string' ? s : s.id) === seat);
+                const isSold = !!soldObj;
+                const owner = typeof soldObj === 'object' ? soldObj.owner : null;
                 const isSelected = selectedSeat === seat;
 
                 return (
@@ -144,7 +166,7 @@ export default function Home() {
                     onClick={() => handleSeatClick(seat)}
                     disabled={isSold}
                     className={`
-                      w-12 h-12 rounded-t-lg rounded-b-md text-xs font-bold transition-all transform
+                      w-14 h-14 flex flex-col items-center justify-center rounded-t-lg rounded-b-md transition-all transform
                       ${isSold 
                         ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed border border-zinc-700' 
                         : isSelected 
@@ -153,7 +175,12 @@ export default function Home() {
                       }
                     `}
                   >
-                    {seat}
+                    <span className="text-sm font-bold">{seat}</span>
+                    {isSold && owner && (
+                      <span className="text-[9px] truncate w-12 text-zinc-500 mt-1" title={owner}>
+                        {owner}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -164,14 +191,14 @@ export default function Home() {
         <div className="bg-zinc-800 p-6 rounded-xl border border-zinc-700">
           <button
             onClick={buyTicket}
-            disabled={loading || !selectedSeat || !username}
+            disabled={loading || !selectedSeat}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-              loading || !selectedSeat || !username
+              loading || !selectedSeat
                 ? 'bg-zinc-700 cursor-not-allowed text-zinc-500'
                 : 'bg-white text-black hover:bg-gray-200 shadow-lg active:scale-95'
             }`}
           >
-            {loading ? 'Processing...' : 'BOOK SEAT 🎟️'}
+            {loading ? 'Processing...' : 'Confirm Booking'}
           </button>
         </div>
       </div>
